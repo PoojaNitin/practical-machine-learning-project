@@ -1,0 +1,172 @@
+---
+title: "Practical Machine Learning"
+author: "Pooja"
+date: "July 12, 2016"
+output: html_document
+---
+###1.Overview:
+This document is the final report of the Peer Assessment project from Coursera's course Practical Machine Learning, as part of the Specialization in Data Science. It was built up in RStudio, using its knitr functions, meant to be published in html format.
+This analysis meant to be the basis for the course quiz and a prediction assignment writeup. The main goal of the project is to predict the manner in which 6 participants performed some exercise as described below. This is the "classe" variable in the training set. The machine learning algorithm described here is applied to the 20 test cases available in the test data and the predictions are submitted in appropriate format to the Course Project Prediction Quiz for automated grading.
+
+A short description of the datasets content from the authors' website:
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)."
+
+###2.Background:
+Using devices such as JawboneUp, NikeFuelBand, and Fitbitit is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in
++their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
++   
++In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).  
+
+###3.Loading and cleaning Data 
+a) Dataset Overview
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+b) Environment Preparation
+We first upload the R libraries that are necessary for the complete analysis.
+```{r}
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+###4 Getting the data
+```{r}
+training<- read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"),na.strings =c( "NA","","#DIV/0!"))
+testing<- read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"),na.strings =c( "NA","","#DIV/0!"))
+dim(training)
+dim(testing)
+```
+
+The raw training data has 19622 rows of observations and 158 features (predictors). Column `X` is unusable row number. While the testing data has 20 rows and the same 158 features. There is one column of target outcome named `classe`.   
+
+###5 Cleaning the data
+
+a.) The assignment  asks to use data from accelerometers on the `belt`, `forearm`, `arm`, and `dumbell`, so the features are extracted based on these keywords. 
+```{r}
+featuretrain = grepl("belt|arm|dumbell", names(training))
+training1<- training[,featuretrain]
+testing1<-  testing[,featuretrain]
+```
+
+
+b.)Some columns were mostly blank. These did not contribute well to the prediction. I chose a feature set that only included complete columns. 
+```{r}
+##remove columns containing NA's
+training2<- training1[,colSums(is.na(training1))==0]
+testing2<- testing1[,colSums(is.na(training1))==0]
+```
+
+###6 Preprocessing the data
+###Check for features's variance
+It is important that features have maximum variance for maximum uniqueness, so that each feature is as distant as possible (as orthogonal as possible) from the other features. 
+
+```{r}
+
+nzvtrain = nearZeroVar(training2, saveMetrics=TRUE)
+nzvtrain
+```
+It shows that all features have enough variance.With the cleaning process above, the number of variables for the analysis has been reduced to 39 only.
+ 
+ 
+###7 Data Partitioning and Prediction Process
+The cleaned downloaded data set was subset in order to generate a test set independent from the 20 cases provided set. Partitioning was performed to obtain a 75% training set and a 25% test set.
+```{r}
+##Include outcome variable in training set
+training2$classe<- training$classe
+##partitiond the training dataset in train and test dataset
+inTrain<- createDataPartition(training2$classe, p=0.75, list = FALSE)
+train<-training2[inTrain,]
+test<-training2[-inTrain,]
+```
+
+###8 Correlation Analysis
+A correlation among variables is analysed before proceeding to the modeling procedures.
+```{r}
+corMatrix <- cor(train[, -40])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower",tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+The highly correlated variables are shown in dark colors in the graph above. To make an evem more compact analysis, a PCA (Principal Components Analysis) could be performed as pre-processing step to the datasets. Nevertheless, as the correlations are quite few, this step will not be applied for this assignment.
+
+###9 Prediction Model Building
+Three methods will be applied to model the regressions (in the Train dataset) and the best one (with higher accuracy when applied to the Test dataset) will be used for the quiz predictions. The methods are: Random Forests, Decision Tree and Generalized Boosted Model, as described below.We are using a 2-fold cross-validation control. This is the simplest k-fold cross-validation possible and it will give a reduced computation time.Because the data set is large, using a small number of folds is justified. A Confusion Matrix is plotted at the end of each analysis to better visualize the accuracy of the models.
+
+a) Method: Random Forest
+```{r}
+set.seed(12345)
+control <- trainControl(method="cv", number=2, verboseIter=FALSE)
+Fitrf <- train(classe ~ ., data=train, method="rf",trControl=control)
+```
+
+prediction on Test dataset
+```{r}
+predrf<-predict(Fitrf, newdata=test)
+cmrf<- confusionMatrix(predrf, test$classe)
+cmrf
+```
+
+
+b) Method: Decision Trees
+```{r}
+FitTree <- rpart(classe ~ ., data=train, method="class")
+fancyRpartPlot(FitTree)
+```
+
+prediction on Test dataset
+```{r}
+predictTree <- predict(FitTree, newdata=test, type="class")
+cmTree <- confusionMatrix(predictTree, test$classe)
+cmTree
+```
+
+
+c) Method: Generalized Boosted Model
+```{r}
+controlgbm <- trainControl(method = "cv", number = 2)
+FitGBM  <- train(classe ~ ., data=train, method = "gbm", trControl = controlgbm, verbose = FALSE)
+```
+
+prediction on Test dataset
+```{r}
+predictGBM <- predict(FitGBM, newdata=test)
+cmGBM<- confusionMatrix(predictGBM, test$classe)
+cmGBM
+```
+
+ 
+d)Summary of 3 regression modeling method in terms of accuracy:
+
+##### Random Forest : 0.9898
+#####Decision Tree : 0.7243
+#####          GBM : 0.9352
+
+Seeing above results, the Random Forest model will be applied to predict the 20 quiz results (testing dataset) as shown below.
+```{r}
+predictTEST <- predict(Fitrf, newdata=testing)
+predictTEST
+```
+
+###9 To check the true accuracy of the finally used random forest model,we calculated Out of sample error 
+```{r}
+outOfSampleErroraccuracy <- sum(predrf == test$classe)/length(predrf)
+outOfSampleErroraccuracy
+```
+
+#### out of sample error 
+```{r}
+outOfSampleError <- 1 - outOfSampleErroraccuracy
+outOfSampleError
+```
